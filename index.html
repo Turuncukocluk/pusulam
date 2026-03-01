@@ -555,7 +555,6 @@
     <div id="gecenHaftaOzeti" style="display:none;margin-bottom:16px"></div>
 
     <!-- Sınıf Karşılaştırması -->
-    <div id="sinifKarsilastirmaKarti" style="display:none;margin-bottom:16px"></div>
 
     <!-- Rozetler -->
     <div id="rozetlerKarti" style="display:none;margin-bottom:16px"></div>
@@ -1289,7 +1288,6 @@ function loadAll() {
   loadRozetler();
   loadGecenHaftaOzeti();
   loadYksTakvim();
-  sinifKarsilastirmaYukle();
   pomodoroSayacYukle();
   fetchAIMotivation();
   uykuInit();
@@ -1307,7 +1305,7 @@ function showPage(name) {
   if (nb) nb.classList.add('active');
   if (name === 'performance') { loadHaftalikPlan(); pomodoroSayacYukle(); uykuInit(); }
   else if (_pomCalisiyorMu) pomodoroDuraklat(); // başka sayfaya geçince duraklat
-  if (name === 'home') { loadStats(); loadOdak(); loadHatirlatma(); loadGeriSayim(); loadRozetler(); loadGecenHaftaOzeti(); sinifKarsilastirmaYukle(); }
+  if (name === 'home') { loadStats(); loadOdak(); loadHatirlatma(); loadGeriSayim(); loadRozetler(); loadGecenHaftaOzeti(); }
   if (name === 'deneme') { loadDenemeler(); setTimeout(netGrafikCiz, 100); }
   if (name === 'degerlendirme') loadDegerlendirme();
   if (name === 'profil') loadProfilForm();
@@ -1927,7 +1925,6 @@ function saveNotlar() { DATA.set('notlar', document.getElementById('notlar').val
 
 // ======== SINIF KARŞILAŞTIRMASI ========
 // Google Apps Script Web App URL — kurulum tamamlanınca buraya yapıştır:
-const APPS_SCRIPT_URL = DATA.get('apps_script_url') || '';
 
 // Kullanıcıdan haftalık anonim veri topla
 function getHaftalikOzet() {
@@ -1966,174 +1963,6 @@ function getHaftalikOzet() {
   };
 }
 
-// Sunucuya veri gönder ve ortalama al
-async function sinifKarsilastirmaYukle() {
-  const el = document.getElementById('sinifKarsilastirmaKarti');
-  if (!el) return;
-
-  const p = DATA.get('profil') || {};
-  if (!p.sinif) {
-    el.style.display = 'none';
-    return;
-  }
-
-  const url = DATA.get('apps_script_url') || APPS_SCRIPT_URL;
-  if (!url) {
-    // URL girilmemişse kurulum kartı göster
-    _sinifKarsilastirmaKurulumGoster(el, p.sinif);
-    return;
-  }
-
-  // Önce cache'e bak — son 6 saatte veri varsa onu kullan
-  const cachedStr = DATA.get('sinif_ortalama_cache');
-  const cachedTime = DATA.get('sinif_ortalama_cache_time') || 0;
-  const altiSaat = 6 * 60 * 60 * 1000;
-  const ozet = getHaftalikOzet();
-
-  if (cachedStr && (Date.now() - cachedTime) < altiSaat) {
-    _sinifKarsilastirmaRender(el, JSON.parse(cachedStr), ozet, p.sinif, false);
-    return;
-  }
-
-  // Sunucuya gönder
-  el.style.display = 'block';
-  el.innerHTML = `<div class="card" style="text-align:center;padding:20px">
-    <div style="font-size:1.5rem;margin-bottom:8px">📡</div>
-    <div style="font-size:0.82rem;color:var(--gray)">Sınıf verileri yükleniyor...</div>
-  </div>`;
-
-  try {
-    const payload = { ...ozet, hafta: getWeekKey(0) };
-    const res = await fetch(url, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    // no-cors ile response body okunamaz, GET ile al
-    await new Promise(r => setTimeout(r, 800));
-    const getRes = await fetch(`${url}?sinif=${p.sinif}&hafta=${getWeekKey(0)}&uuid=${ozet.uuid}`);
-    const data = await getRes.json();
-
-    DATA.set('sinif_ortalama_cache', JSON.stringify(data));
-    DATA.set('sinif_ortalama_cache_time', Date.now());
-    _sinifKarsilastirmaRender(el, data, ozet, p.sinif, true);
-  } catch (e) {
-    // Offline veya hata — cache varsa onu göster, yoksa gizle
-    if (cachedStr) {
-      _sinifKarsilastirmaRender(el, JSON.parse(cachedStr), ozet, p.sinif, false);
-    } else {
-      el.style.display = 'none';
-    }
-  }
-}
-
-function _sinifKarsilastirmaRender(el, data, ozet, sinif, taze) {
-  const {
-    toplamKullanici = 0,
-    ortGorevTamamlama = 0,
-    ortDenemeSayisi = 0,
-    ortHaftalikPuan = 0,
-    ortPomodoro = 0,
-  } = data;
-
-  if (toplamKullanici < 2) {
-    el.style.display = 'none';
-    return;
-  }
-
-  // Kullanıcının değerleri
-  const benimGorev = ozet.gorevTamamlama;
-  const benimDeneme = ozet.denemeSayisi;
-  const benimPuan = ozet.haftalikPuan;
-  const benimPom = ozet.pomodoroSayisi;
-
-  function karsilastir(benim, ort, birim, yukari, asagi) {
-    const fark = benim - ort;
-    if (fark > 0) return `<span style="color:#22c55e;font-weight:900">▲ ${Math.abs(fark).toFixed(birim === '%' ? 0 : 1)}${birim} ${yukari}</span>`;
-    if (fark < 0) return `<span style="color:#ef4444;font-weight:900">▼ ${Math.abs(fark).toFixed(birim === '%' ? 0 : 1)}${birim} ${asagi}</span>`;
-    return `<span style="color:var(--orange);font-weight:900">= Tam ortalamada</span>`;
-  }
-
-  function bar(benim, ort, maks) {
-    const b = Math.min(100, Math.round(benim / maks * 100));
-    const o = Math.min(100, Math.round(ort / maks * 100));
-    return `
-      <div style="position:relative;height:8px;background:#f0e8dc;border-radius:20px;overflow:hidden;margin-top:4px">
-        <div style="position:absolute;left:0;top:0;height:100%;width:${o}%;background:rgba(244,123,32,0.25);border-radius:20px"></div>
-        <div style="position:absolute;left:0;top:0;height:100%;width:${b}%;background:var(--orange);border-radius:20px"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:0.65rem;color:var(--gray);margin-top:2px">
-        <span>Ben: <b style="color:var(--orange)">${benim}</b></span>
-        <span>Ort: <b>${ort % 1 === 0 ? ort : ort.toFixed(1)}</b></span>
-      </div>`;
-  }
-
-  el.style.display = 'block';
-  el.innerHTML = `<div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div>
-        <div class="card-title" style="margin:0"><span class="accent"></span> 📊 ${sinif === 'mezun' ? '🎓 Mezun Ortalaması' : sinif + '. Sınıf Ortalaması'}</div>
-        <div style="font-size:0.7rem;color:var(--gray);margin-top:2px">${toplamKullanici} öğrenci · Bu hafta ${taze ? 'az önce' : 'önce'} güncellendi</div>
-      </div>
-      <button onclick="sinifKarsilastirmaYukle()" style="background:var(--light-orange);border:none;border-radius:10px;padding:6px 10px;cursor:pointer;font-size:0.75rem;color:var(--orange);font-weight:800">🔄</button>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-
-      <div style="background:var(--cream);border-radius:12px;padding:12px">
-        <div style="font-size:0.7rem;font-weight:800;color:var(--gray);text-transform:uppercase;margin-bottom:2px">Görev Tamamlama</div>
-        ${bar(benimGorev, Math.round(ortGorevTamamlama), 100)}
-        <div style="font-size:0.72rem;margin-top:6px">${karsilastir(benimGorev, ortGorevTamamlama, '%', 'üstünde', 'altında')}</div>
-      </div>
-
-      <div style="background:var(--cream);border-radius:12px;padding:12px">
-        <div style="font-size:0.7rem;font-weight:800;color:var(--gray);text-transform:uppercase;margin-bottom:2px">Deneme Sınavı</div>
-        ${bar(benimDeneme, Math.round(ortDenemeSayisi * 10) / 10, Math.max(benimDeneme, ortDenemeSayisi) + 2)}
-        <div style="font-size:0.72rem;margin-top:6px">${karsilastir(benimDeneme, ortDenemeSayisi, '', 'fazla', 'az')}</div>
-      </div>
-
-      <div style="background:var(--cream);border-radius:12px;padding:12px">
-        <div style="font-size:0.7rem;font-weight:800;color:var(--gray);text-transform:uppercase;margin-bottom:2px">Hafta Puanı</div>
-        ${bar(benimPuan, Math.round(ortHaftalikPuan * 10) / 10, 10)}
-        <div style="font-size:0.72rem;margin-top:6px">${karsilastir(benimPuan, ortHaftalikPuan, '', 'üstünde', 'altında')}</div>
-      </div>
-
-      <div style="background:var(--cream);border-radius:12px;padding:12px">
-        <div style="font-size:0.7rem;font-weight:800;color:var(--gray);text-transform:uppercase;margin-bottom:2px">🍅 Pomodoro</div>
-        ${bar(benimPom, Math.round(ortPomodoro * 10) / 10, Math.max(benimPom, ortPomodoro) + 2)}
-        <div style="font-size:0.72rem;margin-top:6px">${karsilastir(benimPom, ortPomodoro, '', 'fazla', 'az')}</div>
-      </div>
-
-    </div>
-
-    <div style="margin-top:10px;font-size:0.68rem;color:var(--gray);text-align:center;line-height:1.5">
-      🔒 Anonim karşılaştırma · İsim veya kişisel veri paylaşılmaz
-    </div>
-  </div>`;
-}
-
-function _sinifKarsilastirmaKurulumGoster(el, sinif) {
-  el.style.display = 'block';
-  el.innerHTML = `<div class="card" style="border:2px dashed var(--orange);background:var(--light-orange)">
-    <div style="font-size:1.5rem;margin-bottom:8px;text-align:center">📊</div>
-    <div style="font-weight:800;font-size:0.9rem;color:var(--text);text-align:center;margin-bottom:6px">${sinif === 'mezun' ? '🎓 Mezun Ortalaması' : sinif + '. Sınıf Ortalaması'}</div>
-    <div style="font-size:0.78rem;color:var(--gray);text-align:center;margin-bottom:14px;line-height:1.5">
-      Sınıf arkadaşlarınla anonim karşılaştırma için uygulama yapımcısına ulaş.
-    </div>
-    <a href="mailto:turuncukoclukmerkezi@gmail.com?subject=Pusulam – Sınıf Karşılaştırması Aktifleştirme&body=Merhaba, sınıf karşılaştırması özelliğini aktif etmek istiyorum. Sınıf: ${sinif}" style="display:block;text-align:center;background:var(--orange);color:white;text-decoration:none;border-radius:12px;padding:10px;font-weight:800;font-size:0.85rem">
-      ✉️ Aktifleştir
-    </a>
-  </div>`;
-}
-
-// Apps Script URL'sini ayarla (yapımcı tarafından kullanılır)
-function setAppsScriptUrl(url) {
-  DATA.set('apps_script_url', url);
-  showToast('✅ Bağlantı kaydedildi!');
-  sinifKarsilastirmaYukle();
-}
 
 // ======== HATIRLATMA NOTU ========
 function saveHatirlatma() {
